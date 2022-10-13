@@ -4,7 +4,7 @@ import math
 
 
 class TemporalLSTM(nn.Module):
-    def __init__(self, input_dim, hidden_dim, seq_len, output_dim):
+    def __init__(self, input_dim, hidden_dim, seq_len, output_dim, temp_node=100):
         super(TemporalLSTM, self).__init__()
 
         # 超参数继承
@@ -12,11 +12,12 @@ class TemporalLSTM(nn.Module):
         self.hidden_dim = hidden_dim
         self.seq_len = seq_len
 
+
         # 注意力的参数
-        self.Wa = nn.Parameter(torch.Tensor(input_dim, seq_len), requires_grad=True)
-        self.Ua = nn.Parameter(torch.Tensor(hidden_dim, seq_len), requires_grad=True)
-        self.ba = nn.Parameter(torch.Tensor(seq_len), requires_grad=True)
-        self.Va = nn.Parameter(torch.Tensor(seq_len, 1), requires_grad=True)
+        self.Wa = nn.Parameter(torch.Tensor(input_dim, seq_len, temp_node), requires_grad=True)
+        self.Ua = nn.Parameter(torch.Tensor(hidden_dim, seq_len, temp_node), requires_grad=True)
+        self.ba = nn.Parameter(torch.Tensor(seq_len, temp_node), requires_grad=True)
+        self.Va = nn.Parameter(torch.Tensor(temp_node, seq_len, 1), requires_grad=True)
         self.Softmax = nn.Softmax(dim=1)
 
         # LSTM参数
@@ -24,6 +25,10 @@ class TemporalLSTM(nn.Module):
         self.U = nn.Parameter(torch.Tensor(hidden_dim, hidden_dim * 4), requires_grad=True)
         self.bias = nn.Parameter(torch.Tensor(hidden_dim * 4), requires_grad=True)
         self.fc = nn.Linear(hidden_dim, output_dim, bias=True)
+
+
+        self.h_t= nn.Parameter()
+        self.LSTM_c_t = nn.Parameter()
 
         # 权重初始化
         self.init_weights()
@@ -57,10 +62,10 @@ class TemporalLSTM(nn.Module):
 
         # 注意力机制的计算
         while t < seq_len:
-            h_t = h
+            # h_t = h
             # 计算注意力(第二个维度对应了是时间序列长度)
             beta_t = torch.tanh(
-                h_t @ self.Wa + (LSTM_c_t @ self.Ua).unsqueeze(1).repeat(1, seq_len, 1) + self.ba) @ self.Va
+                h @ self.Wa[:,t] + (LSTM_c_t @ self.Ua[:,t]).unsqueeze(1).repeat(1, seq_len, 1) + self.ba[t]) @ self.Va[:,t]
 
             # softmax过一次
             beta_t = beta_t.squeeze()
@@ -108,12 +113,12 @@ class SpatialLSTM(nn.Module):
         self.U = nn.Parameter(torch.Tensor(hidden_dim, hidden_dim * 4), requires_grad=True)
         self.bias = nn.Parameter(torch.Tensor(hidden_dim * 4), requires_grad=True)
 
-        # 注意力的参数
-        self.Wa = nn.Parameter(torch.Tensor(input_dim, input_dim), requires_grad=True)
-        self.Ua = nn.Parameter(torch.Tensor(hidden_dim * 2, input_dim), requires_grad=True)
-        self.ba = nn.Parameter(torch.Tensor(input_dim), requires_grad=True)
-        self.Va = nn.Parameter(torch.Tensor(input_dim, input_dim), requires_grad=True)
-        self.Softmax = nn.Softmax(dim=1)
+        # # 注意力的参数
+        # self.Wa = nn.Parameter(torch.Tensor(input_dim, input_dim), requires_grad=True)
+        # self.Ua = nn.Parameter(torch.Tensor(hidden_dim , input_dim), requires_grad=True)
+        # self.ba = nn.Parameter(torch.Tensor(input_dim), requires_grad=True)
+        # self.Va = nn.Parameter(torch.Tensor(input_dim, input_dim), requires_grad=True)
+        # self.Softmax = nn.Softmax(dim=1)
 
         # 权重初始化
         self.init_weights()
@@ -149,14 +154,14 @@ class SpatialLSTM(nn.Module):
             # 取出当前的值
             x_t = x[:, t, :]
 
-            # 计算注意力
-            a_t = torch.tanh(x_t @ self.Wa + torch.cat((h_t, c_t), dim=1) @ self.Ua + self.ba) @ self.Va
-
-            # softmax归一化
-            alpha_t = self.Softmax(a_t / 1)
-
-            # 加权
-            x_t = alpha_t * x_t
+            # # 计算注意力
+            # a_t = torch.tanh(x_t @ self.Wa + c_t @ self.Ua + self.ba) @ self.Va
+            #
+            # # softmax归一化
+            # alpha_t = self.Softmax(a_t / 1)
+            #
+            # # 加权
+            # x_t = alpha_t * x_t
 
             # 计算门值
             gates = x_t @ self.W + h_t @ self.U + self.bias
@@ -176,7 +181,7 @@ class SpatialLSTM(nn.Module):
         hidden_seq = torch.cat(hidden_seq, dim=0)
         hidden_seq = hidden_seq.transpose(0, 1).contiguous()
 
-        return hidden_seq, (h_t, c_t), alpha_t
+        return hidden_seq, (h_t, c_t)
 
 
 class STA_LSTM(nn.Module):
@@ -191,9 +196,9 @@ class STA_LSTM(nn.Module):
 
         # 预测模型
         self.SA = SpatialLSTM(input_dim=feature_num, hidden_dim=sa_hidden)
-        self.TA = TemporalLSTM(input_dim=sa_hidden, hidden_dim=ta_hidden, seq_len=length, output_dim=output_size)
+        self.TA = TemporalLSTM(input_dim=sa_hidden, hidden_dim=ta_hidden, seq_len=length, output_dim=output_size,temp_node=100)
 
     def forward(self, X):
-        hidden_seq, (_, _), _ = self.SA(X)
+        hidden_seq, (_, _) = self.SA(X)
         y_pred, _ = self.TA(hidden_seq)
         return y_pred
