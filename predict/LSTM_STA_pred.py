@@ -3,7 +3,6 @@ from torch.utils.data import Dataset, DataLoader
 import torch.nn as nn
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
 import os
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
@@ -41,16 +40,18 @@ pred_length=10
 data = pd.read_csv("../data/data_final.csv", index_col=0)
 feature_num=len(data.columns)-1
 data = data.values
-
+ss = StandardScaler()
 
 input = torch.from_numpy(data[:,:feature_num]).float()
+input= ss.fit_transform(input)
+input=torch.from_numpy(input).float()
 target = torch.from_numpy(data[:,feature_num:]).float()
 
 config = {
     'epoch_num': 450,
-    'batch_size': 150,
-    'optim_hyper': {'lr': 0.0015, 'weight_decay': 0},
-    'early_stop': 60,
+    'batch_size': 100,
+    'optim_hyper': {'lr': 0.001, 'weight_decay': 0},
+    'early_stop': 100,
     'optimizer': 'Adam',
     'save_name': 'sintering_model.pth'
 }
@@ -104,7 +105,7 @@ def train_pro(train_dataloader, dev_dataloader, model, device, loss_fn):
             l.backward()
             optimizer.step()
         train_loss = dev_pro(dev_dataloader, model, device, loss_fn)
-        if train_loss < min_loss or (epoch + 1) % 10 == 0:
+        if train_loss < min_loss :
             min_loss = train_loss
             print('Saving model (epoch = {:4d}, loss = {:.4f})'
                   .format(epoch + 1, min_loss))
@@ -130,15 +131,20 @@ def dev_pro(dev_dataloader,model,device,loss_fn):
     return total_loss
 
 def test(tt_set, model, device):
-    model.eval()                                # set model to evalutation mode
+    model.eval()  # set model to evalutation mode
+    total_loss = torch.zeros(pred_length)
     preds = []
-    for x in tt_set:                            # iterate through the dataloader
-        x = x.to(device)                        # move data to device (cpu/cuda)
-        with torch.no_grad():                   # disable gradient calculation
-            pred = model(x)                     # forward pass (compute output)
-            preds.append(pred.detach().cpu())   # collect prediction
-    preds = torch.cat(preds, dim=0).numpy()     # concatenate all predictions and convert to a numpy array
-    return preds
+    for x, y in tt_set:  # iterate through the dataloader
+        x = x.to(device)  # move data to device (cpu/cuda)
+        y = y.to(device)
+        with torch.no_grad():  # disable gradient calculation
+            pred = model(x)  # forward pass (compute output)
+            preds.append(pred.detach().cpu())  # collect prediction
+            loss = torch.sum((pred - y) ** 2, dim=0)
+        total_loss += loss.detach().cpu()
+    total_loss = torch.sqrt(total_loss / len(tt_set.dataset))
+    preds = torch.cat(preds, dim=0).numpy()  # concatenate all predictions and convert to a numpy array
+    return preds, total_loss
 
 dataset_train = dataset(input,target,window_length,pred_length,mode='train')
 dataset_dev=dataset(input,target,window_length,pred_length,mode='dev')
@@ -156,4 +162,9 @@ del model
 model = STA_LSTM(feature_num=feature_num,sa_hidden=window_length*2,ta_hidden=window_length,output_size=pred_length,length=window_length)
 model.load_state_dict(torch.load('../model/{}'.format(config['save_name'])))
 model.to(get_device())
-preds = test(dataloader_test, model, get_device())
+preds,loss = test(dataloader_test, model, get_device())
+
+preds=pd.DataFrame(preds)
+loss=pd.DataFrame(loss.numpy())
+preds.to_csv("../res/preds.csv")
+loss.to_csv("../res/loss.csv")

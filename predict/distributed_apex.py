@@ -26,7 +26,7 @@ os.environ['CUDA_VISIBLE_DEVICES'] = '0,1,2,3,4,5,6,7'
 myseed = 42000
 
 
-os.makedirs('model', exist_ok=True)
+os.makedirs('../distributed_model', exist_ok=True)
 def windows_input(input, output, window_range, pred_range):
     num = len(input) - window_range + 1 - pred_range
     input = input.unsqueeze(0)
@@ -52,10 +52,10 @@ input = torch.from_numpy(data[:,:feature_num]).float()
 target = torch.from_numpy(data[:,feature_num:]).float()
 
 config = {
-    'epoch_num': 500,
-    'batch_size': 150,
+    'epoch_num': 800,
+    'batch_size': 50,
     'optim_hyper': {'lr': 0.0015, 'weight_decay': 0},
-    'early_stop': 60,
+    'early_stop': 90,
     'optimizer': 'Adam',
     'save_name': 'sintering_model.pth'
 }
@@ -140,7 +140,7 @@ def train_pro(train_dataloader, dev_dataloader, model, device, loss_fn, rank):
             if (rank == 0):
                 print('Saving model (epoch = {:4d}, loss = {:.4f})'
                       .format(epoch + 1, min_loss))
-                torch.save(ddp_model.state_dict(), 'model/{}'.format(config['save_name']))
+            torch.save(ddp_model.state_dict(), '../distributed_model/{}'.format(config['save_name']))
             early_point = 0
         else:
             early_point += 1
@@ -183,9 +183,15 @@ def test(tt_set, model, device):
     total_loss = torch.sqrt(total_loss / len(tt_set.dataset))
     preds = torch.cat(preds, dim=0).numpy()  # concatenate all predictions and convert to a numpy array
     return preds, total_loss
-
+def set_seed(seed):
+    # 必须禁用模型初始化中的任何随机性。
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
 
 def run_fn(rank, world_size):
+    set_seed(myseed)
     print(f"Running on rank {rank}.")
     set_up(rank, world_size)
 
@@ -200,7 +206,7 @@ def run_fn(rank, world_size):
                              sampler=dev_sampler,
                              shuffle=False)
 
-    model = STA_LSTM(feature_num=feature_num, sa_hidden=40, ta_hidden=40,
+    model = STA_LSTM(feature_num=feature_num, sa_hidden=window_length*2, ta_hidden=window_length,
                      output_size=pred_length, length=window_length)
 
     RMSE = train_pro(
@@ -219,12 +225,6 @@ def main(run_fn, world_size):
 
 
 
-def set_seed(seed):
-    # 必须禁用模型初始化中的任何随机性。
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
 
 
 if __name__ == "__main__":

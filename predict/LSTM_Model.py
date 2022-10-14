@@ -185,7 +185,7 @@ class SpatialLSTM(nn.Module):
 
 
 class STA_LSTM(nn.Module):
-    def __init__(self, feature_num, sa_hidden, ta_hidden, output_size, length):
+    def __init__(self, feature_num, sa_hidden, ta_hidden, output_size, length,temp_node=50):
         super().__init__()
         # 超参数继承
         self.input_dim = feature_num
